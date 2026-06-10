@@ -104,10 +104,10 @@ class AmountNormalizer:
         # 清理输入
         amount = amount.strip()
         
-        # 尝试提取数字
+        # 尝试提取数字前缀
         number_match = re.match(r'^(\d+(?:\.\d+)?)', amount)
         if number_match:
-            # 如果是纯数字，直接返回
+            # 如果以数字开头，直接返回原始表达和数值前缀
             try:
                 numeric_value = float(number_match.group(1))
                 return amount, numeric_value
@@ -132,6 +132,11 @@ class AmountNormalizer:
         """
         if not amount_str:
             return "", "", None
+
+        amount_str = amount_str.strip()
+        if amount_str in self.amount_mappings:
+            normalized = self.amount_mappings[amount_str]
+            return normalized, "", self.estimated_values.get(normalized, None)
         
         # 常见单位模式
         unit_patterns = [
@@ -153,10 +158,26 @@ class AmountNormalizer:
                 except ValueError:
                     pass
         
-        # 处理纯文字表达
-        normalized, estimated = self.normalize_amount(amount_str)
-        return normalized, "", estimated
+        # 处理纯文字表达，支持类似“一小勺盐”“适量盐”的数量+食材写法
+        normalized, trailing_text, estimated = self._parse_textual_amount(amount_str)
+        return normalized, trailing_text, estimated
     
+
+    def _parse_textual_amount(self, amount_str: str) -> Tuple[str, str, Optional[float]]:
+        """解析非数值用量表达，并返回后续的单位或食材文本。"""
+        stripped_amount = amount_str.strip()
+
+        # 优先匹配更长的表达，避免“一勺”先于“一小勺”命中。
+        for source_amount in sorted(self.amount_mappings, key=len, reverse=True):
+            if stripped_amount.startswith(source_amount):
+                normalized = self.amount_mappings[source_amount]
+                trailing_text = stripped_amount[len(source_amount):].strip()
+                estimated = self.estimated_values.get(normalized, None)
+                return normalized, trailing_text, estimated
+
+        normalized, estimated = self.normalize_amount(stripped_amount)
+        return normalized, "", estimated
+
     def get_comparable_value(self, amount: str, unit: str = "") -> Optional[float]:
         """
         获取可比较的数值（用于排序、筛选等）
@@ -216,7 +237,10 @@ def demo_normalization():
         ("一小勺", ""),
     ]
 
-    pass
+    for amount, unit in test_cases:
+        display_amount = normalizer.format_for_display(amount, unit)
+        comparable_value = normalizer.get_comparable_value(amount, unit)
+        print(f"{amount}{unit} -> {display_amount}, 估算值: {comparable_value}")
 
 if __name__ == "__main__":
-    demo_normalization() 
+    demo_normalization()
